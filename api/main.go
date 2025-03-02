@@ -9,6 +9,7 @@ import (
 	ginlogrus "github.com/toorop/gin-logrus"
 
 	"word-search/pkg/logger"
+	"word-search/sockets"
 )
 
 // InitServer initialize server
@@ -28,6 +29,7 @@ func InitServer() {
 		AllowMethods:     []string{"PUT", "PATCH", "POST", "OPTIONS", "GET", "DELETE"},
 	}))
 
+	sockets.ServeWS(router)
 	Router(router)
 
 	err := router.Run(fmt.Sprintf(":%s", os.Getenv("SERVER_PORT")))

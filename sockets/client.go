@@ -1,135 +1,46 @@
 package sockets
 
 import (
-	"fmt"
-	"net/http"
-	"time"
-
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
+	socketIo "github.com/googollee/go-socket.io"
 
 	"word-search/pkg/logger"
 )
 
-const (
-	// Time allowed to write a message to the peer.
-	writeWait = 10 * time.Second
-
-	// Time allowed to read the next pong message from the peer.
-	pongWait = 60 * time.Second
-
-	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
-
-	// Maximum message size allowed from peer.
-	maxMessageSize = 512
-)
-
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
-
-//Client struct for websocket connection and message sending
-type Client struct {
-	ID   string
-	Conn *websocket.Conn
-	send chan Message
-	hub  *Hub
-}
-
-//NewClient creates a new client
-func NewClient(id string, conn *websocket.Conn, hub *Hub) *Client {
-	return &Client{ID: id, Conn: conn, send: make(chan Message, 256), hub: hub}
-}
-
-//Client goroutine to read messages from client
-func (c *Client) Read() {
-	const section = "client.Read"
+// ServeWS Function to handle websocket connection and register client to hub and start goroutines
+func ServeWS(router *gin.Engine) {
+	const section = "client.ServeWS"
 	logger.Log.Infoln(section, "starting")
 
-	defer func() {
-		c.hub.unregister <- c
-		c.Conn.Close()
-	}()
+	server := socketIo.NewServer(nil)
 
-	c.Conn.SetReadLimit(maxMessageSize)
-	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.Conn.SetPongHandler(func(string) error { c.Conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
-	for {
-		var msg Message
-		err := c.Conn.ReadJSON(&msg)
-		if err != nil {
-			fmt.Println("Error: ", err)
-			break
+	server.OnConnect("/", func(s socketIo.Conn) error {
+		s.Emit("welcome", "welcome to server Socket.IO")
+		return nil
+	})
+
+	// handle custom events
+	server.OnEvent("/", "sendMessage", func(s socketIo.Conn, msg string) {
+		s.Emit("receiveMessage", "server say: "+msg)
+	})
+
+	server.OnDisconnect("/", func(s socketIo.Conn, reason string) {
+		logger.Log.Println("Cliente desconectado:", reason)
+	})
+
+	server.OnError("/", func(s socketIo.Conn, e error) {
+		logger.Log.Println("meet error:", e)
+	})
+
+	go func() {
+		if err := server.Serve(); err != nil {
+			logger.Log.Fatalf("socketio listen error: %s\n", err)
 		}
-		c.hub.broadcast <- msg
-	}
+	}()
+	defer server.Close()
+
+	router.GET("/socket.io/*any", gin.WrapH(server))
+	router.POST("/socket.io/*any", gin.WrapH(server))
 
 	logger.Log.Infoln(section, "finished")
-}
-
-//Client goroutine to write messages to client
-func (c *Client) Write() {
-	const section = "client.Write"
-	logger.Log.Infoln(section, "starting")
-
-	ticker := time.NewTicker(pingPeriod)
-	defer func() {
-		ticker.Stop()
-		c.Conn.Close()
-
-		logger.Log.Infoln(section, "finished")
-	}()
-
-	for {
-		select {
-		case message, ok := <-c.send:
-			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if !ok {
-				// The hub closed the channel.
-				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			} else {
-				err := c.Conn.WriteJSON(message)
-				if err != nil {
-					fmt.Println("Error: ", err)
-					break
-				}
-			}
-		case <-ticker.C:
-			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
-		}
-	}
-}
-
-//Close Client closing channel to unregister client
-func (c *Client) Close() {
-	close(c.send)
-}
-
-//ServeWS Function to handle websocket connection and register client to hub and start goroutines
-func ServeWS(ctx *gin.Context, gameID string, hub *Hub) {
-	const section = "client.ServeWS"
-	logger.Log.Infoln(section, gameID,"starting")
-
-	ws, err := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
-
-	client := NewClient(gameID, ws, hub)
-	hub.register <- client
-
-	go client.Write()
-	go client.Read()
-
-	logger.Log.Infoln(section, gameID,"finished")
 }
