@@ -8,7 +8,7 @@ import (
 )
 
 // ServeWS Function to handle websocket connection and register client to hub and start goroutines
-func ServeWS(router *gin.Engine) {
+func ServeWS(router *gin.Engine) *socketIo.Server {
 	const section = "client.ServeWS"
 	logger.Log.Infoln(section, "starting")
 
@@ -32,15 +32,20 @@ func ServeWS(router *gin.Engine) {
 		logger.Log.Println("meet error:", e)
 	})
 
+	server.OnDisconnect("/", func(s socketIo.Conn, reason string) {
+		logger.Log.Println("closed", reason)
+	})
+
 	go func() {
 		if err := server.Serve(); err != nil {
 			logger.Log.Fatalf("socketio listen error: %s\n", err)
 		}
 	}()
-	defer server.Close()
 
 	router.GET("/socket.io/*any", gin.WrapH(server))
 	router.POST("/socket.io/*any", gin.WrapH(server))
 
 	logger.Log.Infoln(section, "finished")
+
+	return server
 }

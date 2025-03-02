@@ -17,7 +17,7 @@ func InitServer() {
 	const section = "server.InitServer"
 	logger.Log.Infoln(section, "starting")
 
-	router := gin.Default()
+	router := gin.New()
 	router.SetTrustedProxies(nil)
 
 	router.Use(ginlogrus.Logger(logger.Log), gin.Recovery())
@@ -29,7 +29,7 @@ func InitServer() {
 		AllowMethods:     []string{"PUT", "PATCH", "POST", "OPTIONS", "GET", "DELETE"},
 	}))
 
-	sockets.ServeWS(router)
+	server := sockets.ServeWS(router)
 	Router(router)
 
 	err := router.Run(fmt.Sprintf(":%s", os.Getenv("SERVER_PORT")))
@@ -40,4 +40,6 @@ func InitServer() {
 	}
 
 	logger.Log.Infoln(section, "finished")
+
+	defer server.Close()
 }
